@@ -1,0 +1,109 @@
+{
+  "manifest_version": "0.3",
+  "name": "fnirsi-psu",
+  "display_name": "FNIRSI Power Supply",
+  "version": "1.0.0",
+  "description": "Control a FNIRSI USB bench power supply: set voltage/current, switch output, read measurements, run sweeps.",
+  "long_description": "Talks to FNIRSI digitally controlled bench power supplies over their USB virtual COM port, using a protocol reverse-engineered from the official Windows app (V1.0.0.0). Lets Claude read live voltage, current, power, CV/CC mode and protection state; change set-points, protection thresholds and presets; sample measurements over time; and run voltage or current sweeps for IV curves. A software voltage/current cap can be set in the extension settings. Pure Python: the only bundled dependency is pyserial.",
+  "author": {
+    "name": "fnirsi-psu contributors"
+  },
+  "license": "MIT",
+  "keywords": ["fnirsi", "power supply", "psu", "lab", "electronics", "serial", "usb"],
+  "server": {
+    "type": "python",
+    "entry_point": "server/main.py",
+    "mcp_config": {
+      "command": "python",
+      "args": ["${__dirname}/server/main.py"],
+      "env": {
+        "PYTHONPATH": "${__dirname}/server/lib",
+        "PYTHONIOENCODING": "utf-8",
+        "FNIRSI_PORT": "${user_config.port}",
+        "FNIRSI_BAUD": "${user_config.baudrate}",
+        "FNIRSI_ADDRESS": "${user_config.address}",
+        "FNIRSI_MAX_V": "${user_config.max_voltage}",
+        "FNIRSI_MAX_I": "${user_config.max_current}",
+        "FNIRSI_SIMULATE": "${user_config.simulate}"
+      },
+      "platform_overrides": {
+        "darwin": { "command": "python3" },
+        "linux": { "command": "python3" }
+      }
+    }
+  },
+  "tools": [
+    { "name": "list_serial_ports", "description": "List serial/COM ports (the PSU is a USB CDC port)" },
+    { "name": "connect", "description": "Handshake with the PSU and read its full state" },
+    { "name": "disconnect", "description": "Leave PC-link mode and close the port" },
+    { "name": "get_status", "description": "Full state: output, set-points, limits, protections, presets" },
+    { "name": "measure", "description": "Fresh V/I/P reading with CV/CC and protection state" },
+    { "name": "set_output", "description": "Switch the output on or off" },
+    { "name": "set_voltage", "description": "Set the voltage set-point" },
+    { "name": "set_current", "description": "Set the current limit" },
+    { "name": "configure", "description": "Set voltage, current and output in one call" },
+    { "name": "set_protection", "description": "Set OVP / OCP / OPP / OTP / LVP thresholds" },
+    { "name": "set_preset", "description": "Store a preset group M1-M6" },
+    { "name": "apply_preset", "description": "Load a preset group into the live set-points" },
+    { "name": "set_display", "description": "Set brightness and Ah/Wh metering" },
+    { "name": "monitor", "description": "Sample V/I/P over time with statistics" },
+    { "name": "sweep", "description": "Voltage or current sweep with a measurement at each step" },
+    { "name": "raw_command", "description": "Send one raw protocol frame (advanced)" }
+  ],
+  "user_config": {
+    "port": {
+      "type": "string",
+      "title": "Serial port",
+      "description": "COM port of the PSU, e.g. COM5 (Windows) or /dev/ttyACM0. Leave empty to pick it at runtime with list_serial_ports + connect.",
+      "required": false,
+      "default": ""
+    },
+    "baudrate": {
+      "type": "number",
+      "title": "Baud rate",
+      "description": "9600, 19200, 38400, 57600 or 115200. Usually irrelevant over USB.",
+      "required": false,
+      "default": 9600,
+      "min": 9600,
+      "max": 115200
+    },
+    "address": {
+      "type": "number",
+      "title": "Device address",
+      "description": "Address configured on the PSU (1-255). The handshake checks it.",
+      "required": false,
+      "default": 1,
+      "min": 1,
+      "max": 255
+    },
+    "max_voltage": {
+      "type": "number",
+      "title": "Safety voltage cap (V)",
+      "description": "Refuse set-points above this. 0 = use the device maximum only.",
+      "required": false,
+      "default": 0,
+      "min": 0,
+      "max": 1000
+    },
+    "max_current": {
+      "type": "number",
+      "title": "Safety current cap (A)",
+      "description": "Refuse current limits above this. 0 = use the device maximum only.",
+      "required": false,
+      "default": 0,
+      "min": 0,
+      "max": 100
+    },
+    "simulate": {
+      "type": "boolean",
+      "title": "Simulation mode",
+      "description": "Use a built-in simulated PSU (10 ohm load) instead of real hardware.",
+      "required": false,
+      "default": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["win32", "darwin", "linux"],
+    "runtimes": { "python": ">=3.8" }
+  }
+}
