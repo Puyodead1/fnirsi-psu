@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "fnirsi-psu",
   "display_name": "FNIRSI Power Supply",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Control a FNIRSI USB bench power supply: set voltage/current, switch output, read measurements, run sweeps.",
   "long_description": "Talks to FNIRSI digitally controlled bench power supplies over their USB virtual COM port, using a protocol reverse-engineered from the official Windows app (V1.0.0.0). Lets Claude read live voltage, current, power, CV/CC mode and protection state; change set-points, protection thresholds and presets; sample measurements over time; and run voltage or current sweeps for IV curves. A software voltage/current cap can be set in the extension settings. Pure Python: the only bundled dependency is pyserial.",
   "author": {

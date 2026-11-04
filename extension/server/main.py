@@ -34,7 +34,7 @@ logging.basicConfig(stream=sys.stderr, level=logging.INFO,
                     format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("fnirsi-mcp")
 
-SERVER_INFO = {"name": "fnirsi-psu", "version": "1.0.0"}
+SERVER_INFO = {"name": "fnirsi-psu", "version": "1.0.1"}
 PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
 
 
