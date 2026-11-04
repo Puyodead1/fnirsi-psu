@@ -388,9 +388,9 @@ def t_raw_command(a):
     psu = S.need()
     cmd, reg = int(a["cmd"], 16), int(a["reg"], 16)
     data = bytes.fromhex(a.get("data_hex", "00"))
-    t = time.monotonic()
+    m = psu.mark()
     frame = psu.send(cmd, reg, data)
-    got = psu.wait_for(reg, t, timeout=float(a.get("timeout_s", 1.0)))
+    got = psu.wait_for(reg, m, timeout=float(a.get("timeout_s", 1.0)))
     return {"sent": frame.hex(" "), "reply_received": got,
             "state": snapshot(psu, full=True) if got else None}
 

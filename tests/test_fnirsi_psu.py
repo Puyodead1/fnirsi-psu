@@ -8,6 +8,7 @@ import os
 import queue
 import struct
 import sys
+import threading
 import time
 import unittest
 
@@ -183,6 +184,42 @@ class DriverTests(unittest.TestCase):
                         serial_factory=lambda: dev)
         psu.close()
         self.assertIn(GT_BAUD5_LEGACY, [hx(f) for f in dev.tx_log])
+
+    def test_read_waits_for_new_reply_with_coarse_clock(self):
+        """Regression: Windows/Python<3.13 time.monotonic() ticks every 15.6 ms.
+        A read issued in the same tick as an earlier reply must still wait."""
+        class CoarseTime:
+            sleep = staticmethod(time.sleep)
+
+            @staticmethod
+            def monotonic():
+                return (time.monotonic() // 0.015625) * 0.015625
+
+        class SlowPSU(FakePSU):
+            """Replies ~5 ms late (inside one clock tick); every read-all
+            reply reports a new input voltage so stale state is detectable."""
+            n = 0
+
+            def _on(self, fr):
+                if fr.cmd == Cmd.READ and fr.reg == Reg.ALL:
+                    SlowPSU.n += 1
+                    d = bytearray(make_bulk())
+                    struct.pack_into("<f", d, 0, float(SlowPSU.n))
+                    frame = dev_frame(Reg.ALL, bytes(d))
+                    threading.Timer(0.005, FakePSU._reply, (self, frame)).start()
+                else:
+                    FakePSU._on(self, fr)
+
+        dev = SlowPSU()
+        psu = FnirsiPSU("SIM", serial_factory=lambda: dev)
+        real_time, fp.time = fp.time, CoarseTime
+        try:
+            for _ in range(20):
+                self.assertTrue(psu.read(Reg.ALL))
+                self.assertEqual(psu.state.vin, float(SlowPSU.n))   # fresh, not stale
+        finally:
+            fp.time = real_time
+            psu.close()
 
     def test_wrong_address(self):
         dev = FakePSU(address=7)

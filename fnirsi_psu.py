@@ -314,7 +314,11 @@ class FnirsiPSU:
         self.parser = FrameParser(strict=strict_checksum)
         self.listeners: list[Callable[[Frame], None]] = []
         self._cv = threading.Condition()
-        self._seen: dict[int, float] = {}
+        # per-register sequence number of the last frame received. A counter,
+        # not a timestamp: time.monotonic() ticks only every ~15.6 ms on Windows
+        # before Python 3.13, so an old reply could look as new as the request.
+        self._seq = 0
+        self._seen: dict[int, int] = {}
         self._stop = threading.Event()
 
         if serial_factory is None:
@@ -365,7 +369,8 @@ class FnirsiPSU:
         for fr in self.parser.feed(chunk):
             with self._cv:
                 apply_frame(self.state, fr)
-                self._seen[fr.reg] = time.monotonic()
+                self._seq += 1
+                self._seen[fr.reg] = self._seq
                 self._cv.notify_all()
             for cb in self.listeners:
                 try:
@@ -373,10 +378,16 @@ class FnirsiPSU:
                 except Exception:
                     log.exception("listener failed")
 
-    def wait_for(self, reg: int, since: float, timeout: Optional[float] = None) -> bool:
+    def mark(self) -> int:
+        """Sequence position to pass to wait_for(); take it BEFORE sending."""
+        with self._cv:
+            return self._seq
+
+    def wait_for(self, reg: int, since: int, timeout: Optional[float] = None) -> bool:
+        """Wait until a frame for `reg` arrives after sequence mark `since`."""
         deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
         with self._cv:
-            while self._seen.get(reg, -1.0) < since:
+            while self._seen.get(reg, 0) <= since:
                 left = deadline - time.monotonic()
                 if left <= 0:
                     return False
@@ -385,9 +396,9 @@ class FnirsiPSU:
 
     def read(self, reg: int, timeout: Optional[float] = None) -> bool:
         """Send a read request and wait for the reply. Returns True if it arrived."""
-        t = time.monotonic()
+        m = self.mark()
         self.send(Cmd.READ, reg)
-        return self.wait_for(reg, t, timeout)
+        return self.wait_for(reg, m, timeout)
 
     def write_float(self, reg: int, value: float) -> None:
         self.send(Cmd.WRITE, reg, f32(value))
