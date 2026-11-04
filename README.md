@@ -6,8 +6,8 @@ Open-source control for **FNIRSI USB bench power supplies**:
 - **[`extension/`](extension)**: a Claude Desktop extension (`.mcpb`, an MCP server) that lets Claude read and drive the supply
 - **[`docs/PROTOCOL.md`](docs/PROTOCOL.md)**: the serial protocol, reverse-engineered from FNIRSI's official Windows app (V1.0.0.0, 2023-12-21)
 
-> [!WARNING]
-> Everything here comes from **static analysis of the vendor software**. It has **not yet been tested on real hardware**. The frame bytes match what the original app generates byte for byte, but device-side behaviour is unconfirmed (see [what is unverified](docs/PROTOCOL.md#7-what-is-not-verified)). Start with no load attached. Reports and fixes from owners are very welcome.
+> [!NOTE]
+> Tested on a **DPS-150** (firmware V1.2). These all work on hardware: the handshake, readings, the push stream, writes (set-points, presets, protection thresholds, brightness, metering) and output on/off. **Behaviour under load (CC mode, Ah/Wh counters, protection trips) is not yet verified** (see the [verification status](docs/PROTOCOL.md#7-hardware-verification-status)). Reports from owners of other models are very welcome.
 
 Not affiliated with or endorsed by Shenzhen FNIRSI Technology Co., Ltd. "FNIRSI" is their trademark.
 
@@ -16,7 +16,8 @@ Not affiliated with or endorsed by Shenzhen FNIRSI Technology Co., Ltd. "FNIRSI"
 The supply enumerates as a **USB CDC virtual COM port** (8N1, RTS on). Frames look like:
 
 ```
-F1  CMD  REG  LEN  DATA[LEN]  SUM        SUM = (REG + LEN + ΣDATA) & 0xFF
+HDR  CMD  REG  LEN  DATA[LEN]  SUM       HDR = F1 (PC→PSU) / F0 (PSU→PC)
+                                         SUM = (REG + LEN + ΣDATA) & 0xFF
 ```
 
 `CMD`: `A1` read, `B1` write, `B0` baud, `C0` bootloader, `C1` PC-link on/off. Values are little-endian `float32`; registers `C0`–`E3` hold set-points, live V/I/P, presets, protections and status; `FF` returns everything in one block. Full register map, session sequence and quirks are in [docs/PROTOCOL.md](docs/PROTOCOL.md).

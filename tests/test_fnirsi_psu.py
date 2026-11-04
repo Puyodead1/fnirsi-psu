@@ -47,7 +47,24 @@ def hx(b):
 
 
 def dev_frame(reg, data, cmd=0xA1):
-    return build_frame(cmd, reg, data)
+    return build_frame(cmd, reg, data, header=fp.DEVICE_HEADER)
+
+
+# Frames captured from a real DPS-150 (fw V1.2, hw V1.0) on USB 5 V input,
+# output off, LVP active.
+HW_BULK = bytes.fromhex(
+    "f0a1ff8bcaa19d4000001041676 6a63f000000000000000000000000b9e9ad41"
+    "3233f3400000404000009841000040400000a0400000803f0000a0400000803f"
+    "0000a0400000803f0000a0400000803f0000f0413333a3400000164300 00a042"
+    "0000a0400a0a0100000000000000000005010164 3b97403333a3400000f041"
+    "3333a340000016430000c6420000f041ce".replace(" ", ""))
+HW_PUSH = bytes.fromhex(
+    "f0a1c30c000000000000000000000000cf"        # C3 V/I/P
+    "f0a1c004b4a69d40fb"                        # C0 Vin
+    "f0a1e2044e409740 4b"                       # E2 max Vset
+    "f0a1e3043333a34030"                        # E3 max Iset
+    "f0a1c404a75cae41ba".replace(" ", ""))      # C4 temperature
+HW_MODEL = bytes.fromhex("f0a1de0744505 32d3135308f".replace(" ", ""))
 
 
 def make_bulk():
@@ -135,10 +152,42 @@ class FrameTests(unittest.TestCase):
         self.assertEqual([f.reg for f in frames], [Reg.TEMP, Reg.CV_CC])
         self.assertTrue(all(f.checksum_ok for f in frames))
 
-    def test_parser_bad_checksum(self):
+    def test_parser_bad_checksum_resyncs(self):
         bad = bytearray(dev_frame(Reg.CV_CC, 1)); bad[-1] ^= 0xFF
-        self.assertFalse(FrameParser().feed(bytes(bad))[0].checksum_ok)
-        self.assertEqual(FrameParser(strict=True).feed(bytes(bad)), [])
+        good = dev_frame(Reg.TEMP, fp.f32(40.0))
+        p = FrameParser()
+        frames = p.feed(bytes(bad) + good)
+        self.assertEqual([f.reg for f in frames], [Reg.TEMP])
+        self.assertEqual(p.bad_frames, 1)
+
+    def test_parser_garbage_length_does_not_swallow_frames(self):
+        # a stray header byte followed by a huge "length" must not eat real frames
+        p = FrameParser()
+        frames = p.feed(b"\xf1\xaa\x41\xff" + HW_PUSH + HW_MODEL + b"\x00" * 200)
+        self.assertEqual([f.reg for f in frames],
+                         [Reg.OUTPUT_VIP, Reg.VIN, Reg.VSET_MAX, Reg.ISET_MAX, Reg.TEMP,
+                          Reg.MODEL])
+
+    def test_real_dps150_frames(self):
+        st = fp.State()
+        frames = FrameParser().feed(HW_PUSH + HW_MODEL + HW_BULK)
+        self.assertEqual(len(frames), 7)
+        for fr in frames:
+            fp.apply_frame(st, fr)
+        self.assertEqual(st.model, "DPS-150")
+        self.assertEqual(len(HW_BULK) - 5, 139)
+        self.assertAlmostEqual(st.vset, 9.0)
+        self.assertAlmostEqual(st.iset, 1.3, places=5)
+        self.assertAlmostEqual(st.vin, 4.926, places=3)
+        self.assertEqual(st.presets[1], [st.presets[1][0], 3.0])
+        self.assertAlmostEqual(st.presets[2][0], 19.0)
+        self.assertEqual((st.ovp, st.otp, st.lvp), (30.0, 80.0, 5.0))
+        self.assertEqual((st.brightness, st.unknown_d7, st.address), (10, 10, 1))
+        self.assertIs(st.output_on, False)
+        self.assertEqual(st.protection, fp.Protection.LVP)    # Vin 4.93 < LVP 5.0
+        self.assertTrue(st.cv_mode)
+        self.assertAlmostEqual(st.iset_max, 5.1, places=5)
+        self.assertEqual((st.opp_max, st.otp_max), (150.0, 99.0))
 
     def test_bulk_decode(self):
         st = fp.State()

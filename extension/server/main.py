@@ -127,14 +127,14 @@ class Session:
             raise ToolError("voltage must be >= 0")
         lim = self.limit_v(psu)
         if lim is not None and v > lim + 1e-6:
-            raise ToolError(f"{v} V exceeds the limit of {lim} V")
+            raise ToolError(f"{v} V exceeds the limit of {lim:.3f} V")
 
     def check_i(self, psu, a):
         if a < 0:
             raise ToolError("current must be >= 0")
         lim = self.limit_i(psu)
         if lim is not None and a > lim + 1e-6:
-            raise ToolError(f"{a} A exceeds the limit of {lim} A")
+            raise ToolError(f"{a} A exceeds the limit of {lim:.3f} A")
 
 
 S = Session()

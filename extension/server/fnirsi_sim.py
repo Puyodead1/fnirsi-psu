@@ -8,7 +8,7 @@ import struct
 import threading
 import time
 
-from fnirsi_psu import Cmd, Reg, FrameParser, build_frame
+from fnirsi_psu import Cmd, Reg, FrameParser, build_frame, DEVICE_HEADER
 
 
 class SimulatedPSU:
@@ -44,7 +44,7 @@ class SimulatedPSU:
         return v, i, v * i, cv
 
     def _f(self, reg, data):
-        self.rx.put(build_frame(0xA1, reg, data))
+        self.rx.put(build_frame(0xA1, reg, data, header=DEVICE_HEADER))
 
     def _push_loop(self):
         while not self._stop.wait(0.5):

@@ -30,7 +30,10 @@ from typing import Callable, Iterable, Optional
 
 log = logging.getLogger("fnirsi_psu")
 
-HEADER = 0xF1
+HOST_HEADER = 0xF1      # PC -> device
+DEVICE_HEADER = 0xF0    # device -> PC (confirmed on a DPS-150; the app never checks it)
+HEADER = HOST_HEADER    # backwards-compatible alias
+HEADERS = (HOST_HEADER, DEVICE_HEADER)
 BAUD_RATES = (9600, 19200, 38400, 57600, 115200)
 
 
@@ -95,12 +98,13 @@ def checksum(reg: int, data: bytes) -> int:
     return (reg + len(data) + sum(data)) & 0xFF
 
 
-def build_frame(cmd: int, reg: int, data: bytes | int = b"\x00") -> bytes:
+def build_frame(cmd: int, reg: int, data: bytes | int = b"\x00",
+                header: int = HOST_HEADER) -> bytes:
     if isinstance(data, int):
         data = bytes([data])
     if not 1 <= len(data) <= 255:
         raise ValueError("data length must be 1..255")
-    return bytes([HEADER, cmd, reg, len(data)]) + data + bytes([checksum(reg, data)])
+    return bytes([header, cmd, reg, len(data)]) + data + bytes([checksum(reg, data)])
 
 
 def f32(value: float) -> bytes:
@@ -126,20 +130,28 @@ class Frame:
 class FrameParser:
     """Streaming parser: feed() arbitrary chunks, get complete frames back.
 
-    Unlike the original app it resynchronises on the 0xF1 header and checks the
-    checksum. Frames with a bad checksum are returned flagged (strict=False) or
-    dropped (strict=True), since device-side checksum behaviour is unverified.
+    Accepts both headers (0xF0 device->PC, 0xF1 PC->device), resynchronises on
+    them and checks the checksum. On a bad checksum the candidate's length byte
+    can't be trusted, so only the header byte is dropped and parsing resumes at
+    the next header; nothing is returned for it.
     """
 
-    def __init__(self, strict: bool = False):
+    def __init__(self, strict: bool = True):
         self.buf = bytearray()
-        self.strict = strict
+        self.strict = strict          # kept for API compatibility
+        self.bad_frames = 0
+
+    def _find_header(self) -> int:
+        for i, b in enumerate(self.buf):
+            if b in HEADERS:
+                return i
+        return -1
 
     def feed(self, chunk: bytes) -> list[Frame]:
         self.buf += chunk
         out: list[Frame] = []
         while True:
-            start = self.buf.find(HEADER)
+            start = self._find_header()
             if start < 0:
                 self.buf.clear()
                 break
@@ -152,14 +164,14 @@ class FrameParser:
             if len(self.buf) < total:
                 break
             raw = bytes(self.buf[:total])
-            del self.buf[:total]
             reg, data = raw[2], raw[4:-1]
-            ok = checksum(reg, data) == raw[-1]
-            if not ok:
-                log.warning("checksum mismatch: %s", raw.hex(" "))
-                if self.strict:
-                    continue
-            out.append(Frame(raw[1], reg, data, ok))
+            if checksum(reg, data) != raw[-1]:
+                self.bad_frames += 1
+                log.debug("bad checksum, resyncing: %s", raw[:8].hex(" "))
+                del self.buf[:1]
+                continue
+            del self.buf[:total]
+            out.append(Frame(raw[1], reg, data, True))
         return out
 
 
@@ -549,6 +561,14 @@ def _frange(start: float, stop: float, step: float):
 # CLI
 # --------------------------------------------------------------------------- #
 
+def _fmt(x, nd) -> str:
+    return "-" if x is None else f"{x:.{nd}f}"
+
+
+def _prot_name(p) -> str:
+    return getattr(p, "name", str(p))
+
+
 def _main(argv=None) -> int:
     import argparse
     p = argparse.ArgumentParser(description="FNIRSI power supply control")
@@ -566,8 +586,10 @@ def _main(argv=None) -> int:
     logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO)
     with FnirsiPSU(a.port, a.baud, a.address) as psu:
         s = psu.state
-        print(f"model={s.model} fw={s.firmware} df={s.string_df} addr={s.address}")
-        print(f"Vin={s.vin} Vset={s.vset} Iset={s.iset} max={s.vset_max}V/{s.iset_max}A")
+        print(f"model={s.model} fw={s.firmware} hw={s.string_df} addr={s.address}")
+        print(f"Vin={_fmt(s.vin, 3)} V  Vset={_fmt(s.vset, 3)} V  Iset={_fmt(s.iset, 3)} A  "
+              f"max={_fmt(s.vset_max, 3)} V / {_fmt(s.iset_max, 3)} A  "
+              f"output={'ON' if s.output_on else 'OFF'}  protection={_prot_name(s.protection)}")
         if a.set_v is not None:
             psu.set_voltage(a.set_v)
         if a.set_i is not None:
@@ -580,8 +602,9 @@ def _main(argv=None) -> int:
             end = time.monotonic() + a.monitor
             while time.monotonic() < end:
                 v, i, w = psu.measure()
-                print(f"{v!s:>8} V {i!s:>8} A {w!s:>8} W  T={s.temp_c} "
-                      f"{'CV' if s.cv_mode else 'CC'} prot={s.protection}")
+                print(f"{_fmt(v, 3):>7} V {_fmt(i, 4):>7} A {_fmt(w, 3):>7} W  "
+                      f"T={_fmt(s.temp_c, 1)} C  {'CV' if s.cv_mode else 'CC'}  "
+                      f"{_prot_name(s.protection)}")
                 time.sleep(0.5)
     return 0
 
