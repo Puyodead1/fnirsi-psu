@@ -26,6 +26,9 @@ class SimulatedPSU:
         self.brightness, self.metering, self.on = 7, 1, 0
         self.ah = self.wh = 0.0
         self.online = False
+        # one lock for state + reply queueing, so a periodic push can never be
+        # computed from old state and queued after a newer reply
+        self._lock = threading.RLock()
         self._stop = threading.Event()
         threading.Thread(target=self._push_loop, daemon=True).start()
 
@@ -45,12 +48,13 @@ class SimulatedPSU:
 
     def _push_loop(self):
         while not self._stop.wait(0.5):
-            if self.online:
-                v, i, p, cv = self._vip()
-                self.ah += i * 0.5 / 3600
-                self.wh += p * 0.5 / 3600
-                self._f(Reg.OUTPUT_VIP, struct.pack("<3f", v, i, p))
-                self._f(Reg.CV_CC, cv)
+            with self._lock:
+                if self.online:
+                    v, i, p, cv = self._vip()
+                    self.ah += i * 0.5 / 3600
+                    self.wh += p * 0.5 / 3600
+                    self._f(Reg.OUTPUT_VIP, struct.pack("<3f", v, i, p))
+                    self._f(Reg.CV_CC, cv)
 
     def _bulk(self):
         v, i, p, cv = self._vip()
@@ -68,8 +72,9 @@ class SimulatedPSU:
 
     # pyserial API
     def write(self, b):
-        for fr in self.parser.feed(bytes(b)):
-            self._on(fr)
+        with self._lock:
+            for fr in self.parser.feed(bytes(b)):
+                self._on(fr)
         return len(b)
 
     def read(self, n):
